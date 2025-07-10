@@ -1,16 +1,16 @@
 #!/bin/bash
 
-# Script to interactively collect Cisco switch credentials, check CIS Cisco IOS Benchmark compliance, and generate HTML report
-# Version: 1.0.0
-# Features: Auto-installs dependencies, displays script banner, requires user permission, checks CIS recommendations, generates HTML report with pie chart
+# Script to interactively collect Cisco switch credentials, check CIS Cisco IOS/NX-OS Benchmark compliance based on user-selected platform, and generate HTML report
+# Version: 1.1.0
+# Features: Auto-installs dependencies, displays script banner, requires user permission, platform-specific checks, generates HTML report with pie chart
 
 # Display script banner
 cat << 'EOF'
 
 ========================================
-   CIS Cisco IOS Switch Compliance Checker
+   CIS Cisco Switch Compliance Checker
 ========================================
-Version: 1.0.0          Developer: Astra
+Version: 1.1.0         Developer: Astra
 ========================================
 
 EOF
@@ -21,6 +21,23 @@ read -r confirm
 if [[ "$confirm" != "y" && "$confirm" != "Y" ]]; then
     echo "Execution aborted by user."
     exit 0
+fi
+
+# Prompt for platform selection
+echo "Select the Cisco switch platform:"
+echo "1) IOS (IOS/IOS XE)"
+echo "2) NXOS (NX-OS)"
+echo "Enter choice (1 or 2):"
+read -r platform_choice
+if [[ "$platform_choice" == "1" ]]; then
+    PLATFORM="IOS"
+    REPORT_TITLE="CIS Cisco IOS Benchmark Compliance Report"
+elif [[ "$platform_choice" == "2" ]]; then
+    PLATFORM="NXOS"
+    REPORT_TITLE="CIS Cisco NX-OS Benchmark Compliance Report"
+else
+    echo "Error: Invalid platform choice. Please select 1 (IOS) or 2 (NXOS)."
+    exit 1
 fi
 
 # Function to detect package manager and install dependencies
@@ -135,7 +152,7 @@ if [ -z "$PASSWORD" ]; then
     exit 1
 fi
 
-# Set SSH command (enable mode for privileged commands)
+# Set SSH command (platform-specific enable mode handling)
 SSH_COMMAND="sshpass -p \"$PASSWORD\" ssh -p $SSH_PORT -o StrictHostKeyChecking=no $USERNAME@$CISCO_IP"
 REPORT_FILE="cis_cisco_compliance_report.html"
 TEMP_FILE="cis_cisco_temp.txt"
@@ -143,29 +160,54 @@ TEMP_FILE="cis_cisco_temp.txt"
 # Initialize temporary file for results
 : > $TEMP_FILE
 
-# Define findings information (ID, Name, Risk Rating, Remediation)
-declare -A FINDINGS_INFO=(
-    ["1.1.1"]="Ensure minimum password length is 15 or more|High|configure terminal\nenable secret <password>\nline vty 0 4\npassword <password>\nend\nwrite memory"
-    ["1.1.2"]="Ensure password complexity is enabled|High|configure terminal\naaa new-model\naaa common-criteria policy cc-policy\nmin-length 15\nnumeric-count 1\nupper-case 1\nlower-case 1\nspecial-case 1\nend\nwrite memory"
-    ["1.2.1"]="Ensure AAA authentication for local users|High|configure terminal\naaa new-model\naaa authentication login default local\nend\nwrite memory"
-    ["1.3.1"]="Ensure SSH is enabled|Medium|configure terminal\nip ssh version 2\nip ssh time-out 60\nip ssh authentication-retries 3\nend\nwrite memory"
-    ["1.3.2"]="Ensure SSH access is restricted|Medium|configure terminal\nline vty 0 4\naccess-class 10 in\nend\nwrite memory\nNote: Create ACL 10 to restrict IPs"
-    ["1.3.3"]="Ensure SSH uses strong ciphers|Medium|configure terminal\nip ssh server algorithm encryption aes256-ctr aes192-ctr aes128-ctr\nend\nwrite memory"
-    ["1.4.1"]="Ensure login banner is configured|Low|configure terminal\nbanner motd ^C Authorized access only! ^C\nend\nwrite memory"
-    ["1.4.2"]="Ensure EXEC timeout is 10 minutes or less|Medium|configure terminal\nline vty 0 4\nexec-timeout 10 0\nend\nwrite memory"
-    ["2.1.1"]="Ensure NTP is enabled|High|configure terminal\nntp server pool.ntp.org\nntp authentication-key 1 md5 <key>\nntp trusted-key 1\nend\nwrite memory"
-    ["2.2.1"]="Ensure logging is enabled|High|configure terminal\nlogging on\nlogging host <syslog_server>\nlogging trap informational\nend\nwrite memory"
-    ["2.2.2"]="Ensure logging includes timestamps|Medium|configure terminal\nservice timestamps log datetime msec\nend\nwrite memory"
-    ["2.3.1"]="Ensure SNMPv3 is used|Medium|configure terminal\nsnmp-server group <group> v3 auth\nsnmp-server user <user> <group> v3 auth sha <password>\nend\nwrite memory"
-    ["2.3.2"]="Ensure SNMP communities are not public/private|High|configure terminal\nno snmp-server community public\nno snmp-server community private\nend\nwrite memory"
-    ["3.1.1"]="Ensure VTY lines use only SSH|High|configure terminal\nline vty 0 4\ntransport input ssh\nend\nwrite memory"
-    ["3.1.2"]="Ensure telnet is disabled|High|configure terminal\nline vty 0 4\ntransport input none\nend\nwrite memory"
-    ["3.2.1"]="Ensure loopback interface is configured|Medium|configure terminal\ninterface loopback0\nip address <loopback_ip> 255.255.255.255\nend\nwrite memory"
-    ["4.1.1"]="Ensure ACLs are applied to interfaces|Medium|configure terminal\ninterface <interface>\nip access-group <acl_name> in\nend\nwrite memory"
-    ["4.2.1"]="Ensure port security is enabled|Medium|configure terminal\ninterface <interface>\nswitchport port-security\nswitchport port-security maximum 2\nswitchport port-security violation restrict\nend\nwrite memory"
-    ["5.1.1"]="Ensure VLAN 1 is not used|High|configure terminal\ninterface <interface>\nswitchport access vlan <non-1-vlan>\nend\nwrite memory"
-    ["5.2.1"]="Ensure spanning-tree PortFast is enabled on access ports|Medium|configure terminal\ninterface <interface>\nspanning-tree portfast\nend\nwrite memory"
-)
+# Define findings information (ID, Name, Risk Rating, Remediation) based on platform
+if [ "$PLATFORM" == "IOS" ]; then
+    declare -A FINDINGS_INFO=(
+        ["1.1.1"]="Ensure minimum password length is 15 or more|High|configure terminal\nenable secret <password>\nline vty 0 4\npassword <password>\nend\nwrite memory"
+        ["1.1.2"]="Ensure password complexity is enabled|High|configure terminal\naaa new-model\naaa common-criteria policy cc-policy\nmin-length 15\nnumeric-count 1\nupper-case 1\nlower-case 1\nspecial-case 1\nend\nwrite memory"
+        ["1.2.1"]="Ensure AAA authentication for local users|High|configure terminal\naaa new-model\naaa authentication login default local\nend\nwrite memory"
+        ["1.3.1"]="Ensure SSH is enabled|Medium|configure terminal\nip ssh version 2\nip ssh time-out 60\nip ssh authentication-retries 3\nend\nwrite memory"
+        ["1.3.2"]="Ensure SSH access is restricted|Medium|configure terminal\nline vty 0 4\naccess-class 10 in\nend\nwrite memory\nNote: Create ACL 10 to restrict IPs"
+        ["1.3.3"]="Ensure SSH uses strong ciphers|Medium|configure terminal\nip ssh server algorithm encryption aes256-ctr aes192-ctr aes128-ctr\nend\nwrite memory"
+        ["1.4.1"]="Ensure login banner is configured|Low|configure terminal\nbanner motd ^C Authorized access only! ^C\nend\nwrite memory"
+        ["1.4.2"]="Ensure EXEC timeout is 10 minutes or less|Medium|configure terminal\nline vty 0 4\nexec-timeout 10 0\nend\nwrite memory"
+        ["2.1.1"]="Ensure NTP is enabled|High|configure terminal\nntp server pool.ntp.org\nntp authentication-key 1 md5 <key>\nntp trusted-key 1\nend\nwrite memory"
+        ["2.2.1"]="Ensure logging is enabled|High|configure terminal\nlogging on\nlogging host <syslog_server>\nlogging trap informational\nend\nwrite memory"
+        ["2.2.2"]="Ensure logging includes timestamps|Medium|configure terminal\nservice timestamps log datetime msec\nend\nwrite memory"
+        ["2.3.1"]="Ensure SNMPv3 is used|Medium|configure terminal\nsnmp-server group <group> v3 auth\nsnmp-server user <user> <group> v3 auth sha <password>\nend\nwrite memory"
+        ["2.3.2"]="Ensure SNMP communities are not public/private|High|configure terminal\nno snmp-server community public\nno snmp-server community private\nend\nwrite memory"
+        ["3.1.1"]="Ensure VTY lines use only SSH|High|configure terminal\nline vty 0 4\ntransport input ssh\nend\nwrite memory"
+        ["3.1.2"]="Ensure telnet is disabled|High|configure terminal\nline vty 0 4\ntransport input none\nend\nwrite memory"
+        ["3.2.1"]="Ensure loopback interface is configured|Medium|configure terminal\ninterface loopback0\nip address <loopback_ip> 255.255.255.255\nend\nwrite memory"
+        ["4.1.1"]="Ensure ACLs are applied to interfaces|Medium|configure terminal\ninterface <interface>\nip access-group <acl_name> in\nend\nwrite memory"
+        ["4.2.1"]="Ensure port security is enabled|Medium|configure terminal\ninterface <interface>\nswitchport port-security\nswitchport port-security maximum 2\nswitchport port-security violation restrict\nend\nwrite memory"
+        ["5.1.1"]="Ensure VLAN 1 is not used|High|configure terminal\ninterface <interface>\nswitchport access vlan <non-1-vlan>\nend\nwrite memory"
+        ["5.2.1"]="Ensure spanning-tree PortFast is enabled on access ports|Medium|configure terminal\ninterface <interface>\nspanning-tree portfast\nend\nwrite memory"
+    )
+else
+    declare -A FINDINGS_INFO=(
+        ["1.1.1"]="Ensure minimum password length is 15 or more|High|configure terminal\nusername <username> secret <password>\nend"
+        ["1.1.2"]="Ensure password complexity is enabled|High|configure terminal\nfeature password-policy\npassword-policy min-length 15\npassword-policy upper-case 1\npassword-policy lower-case 1\npassword-policy digit 1\npassword-policy special 1\nend"
+        ["1.2.1"]="Ensure AAA authentication for local users|High|configure terminal\naaa authentication login default local\nend"
+        ["1.3.1"]="Ensure SSH is enabled|Medium|configure terminal\nfeature ssh\nssh key rsa 2048\nend"
+        ["1.3.2"]="Ensure SSH access is restricted|Medium|configure terminal\nip access-list <acl_name>\npermit ip <allowed_ip> <mask>\ndeny ip any any\nline vty\nip access-class <acl_name> in\nend"
+        ["1.3.3"]="Ensure SSH uses strong ciphers|Medium|configure terminal\nssh server algorithms cipher aes256-ctr aes192-ctr aes128-ctr\nend"
+        ["1.4.1"]="Ensure login banner is configured|Low|configure terminal\nbanner motd ^C Authorized access only! ^C\nend"
+        ["1.4.2"]="Ensure EXEC timeout is 10 minutes or less|Medium|configure terminal\nline vty\nexec-timeout 10\nend"
+        ["2.1.1"]="Ensure NTP is enabled|High|configure terminal\nntp server pool.ntp.org\nntp master\nend"
+        ["2.2.1"]="Ensure logging is enabled|High|configure terminal\nlogging server <syslog_server>\nlogging level all 6\nend"
+        ["2.2.2"]="Ensure logging includes timestamps|Medium|configure terminal\nlogging timestamp milliseconds\nend"
+        ["2.3.1"]="Ensure SNMPv3 is used|Medium|configure terminal\nsnmp-server user <user> network-admin v3 auth sha <password>\nend"
+        ["2.3.2"]="Ensure SNMP communities are not public/private|High|configure terminal\nno snmp-server community public\nno snmp-server community private\nend"
+        ["3.1.1"]="Ensure VTY lines use only SSH|High|configure terminal\nline vty\ntransport input ssh\nend"
+        ["3.1.2"]="Ensure telnet is disabled|High|configure terminal\nno feature telnet\nend"
+        ["3.2.1"]="Ensure loopback interface is configured|Medium|configure terminal\ninterface loopback0\nip address <loopback_ip>/32\nend"
+        ["4.1.1"]="Ensure ACLs are applied to interfaces|Medium|configure terminal\ninterface <interface>\nip access-group <acl_name> in\nend"
+        ["4.2.1"]="Ensure port security is enabled|Medium|configure terminal\ninterface <interface>\nswitchport port-security\nswitchport port-security max 2\nswitchport port-security violation restrict\nend"
+        ["5.1.1"]="Ensure VLAN 1 is not used|High|configure terminal\ninterface <interface>\nswitchport access vlan <non-1-vlan>\nend"
+        ["5.2.1"]="Ensure spanning-tree PortFast is enabled on access ports|Medium|configure terminal\ninterface <interface>\nspanning-tree portfast\nend"
+    )
+fi
 
 # Function to execute command and check output
 check_config() {
@@ -182,10 +224,15 @@ check_config() {
     IFS='|' read -r name risk remediation <<< "${FINDINGS_INFO[$check_id]}"
 
     echo "Checking $check_id: $description..."
-    # Execute command in privileged EXEC mode
-    output=$($SSH_COMMAND "enable\n$PASSWORD\n$command" 2>/dev/null)
+    if [ "$PLATFORM" == "IOS" ]; then
+        # IOS: Use enable mode
+        output=$($SSH_COMMAND "enable\n$PASSWORD\n$command" 2>/dev/null)
+    else
+        # NX-OS: No enable mode required for most commands
+        output=$($SSH_COMMAND "$command" 2>/dev/null)
+    fi
     if [ $? -ne 0 ]; then
-        echo "Error: Failed to connect to $CISCO_IP on port $SSH_PORT or enter enable mode. Check credentials, connectivity, or SSH access."
+        echo "Error: Failed to connect to $CISCO_IP on port $SSH_PORT or execute command. Check credentials, connectivity, or SSH access."
         exit 1
     fi
     if echo "$output" | grep -qE "$expected"; then
@@ -196,67 +243,130 @@ check_config() {
     echo "[$status] $check_id|$name|$risk|$remediation" >> $TEMP_FILE
 }
 
-# Perform compliance checks
-check_config "1.1.1" "Ensure minimum password length is 15 or more" \
-    "show running-config | include enable secret" \
-    "enable secret"
-check_config "1.1.2" "Ensure password complexity is enabled" \
-    "show running-config | include aaa common-criteria policy" \
-    "min-length 15"
-check_config "1.2.1" "Ensure AAA authentication for local users" \
-    "show running-config | include aaa authentication login" \
-    "aaa authentication login default local"
-check_config "1.3.1" "Ensure SSH is enabled" \
-    "show ip ssh" \
-    "SSH Enabled - version 2"
-check_config "1.3.2" "Ensure SSH access is restricted" \
-    "show running-config | include line vty" \
-    "access-class [0-9]+ in"
-check_config "1.3.3" "Ensure SSH uses strong ciphers" \
-    "show ip ssh" \
-    "Encryption Algorithms:.*aes256-ctr"
-check_config "1.4.1" "Ensure login banner is configured" \
-    "show running-config | include banner motd" \
-    "banner motd"
-check_config "1.4.2" "Ensure EXEC timeout is 10 minutes or less" \
-    "show running-config | include line vty" \
-    "exec-timeout 10"
-check_config "2.1.1" "Ensure NTP is enabled" \
-    "show ntp status" \
-    "synchronized"
-check_config "2.2.1" "Ensure logging is enabled" \
-    "show logging" \
-    "logging on"
-check_config "2.2.2" "Ensure logging includes timestamps" \
-    "show running-config | include service timestamps" \
-    "service timestamps log datetime msec"
-check_config "2.3.1" "Ensure SNMPv3 is used" \
-    "show snmp user" \
-    "v3.*auth sha"
-check_config "2.3.2" "Ensure SNMP communities are not public/private" \
-    "show running-config | include snmp-server community" \
-    "^$"
-check_config "3.1.1" "Ensure VTY lines use only SSH" \
-    "show running-config | include line vty" \
-    "transport input ssh"
-check_config "3.1.2" "Ensure telnet is disabled" \
-    "show running-config | include line vty" \
-    "transport input (ssh|none)"
-check_config "3.2.1" "Ensure loopback interface is configured" \
-    "show running-config | include interface Loopback" \
-    "interface Loopback0"
-check_config "4.1.1" "Ensure ACLs are applied to interfaces" \
-    "show running-config | include interface" \
-    "ip access-group"
-check_config "4.2.1" "Ensure port security is enabled" \
-    "show running-config | include switchport port-security" \
-    "switchport port-security"
-check_config "5.1.1" "Ensure VLAN 1 is not used" \
-    "show running-config | include switchport access vlan" \
-    "switchport access vlan [2-9]|[1-9][0-9]+"
-check_config "5.2.1" "Ensure spanning-tree PortFast is enabled on access ports" \
-    "show running-config | include spanning-tree portfast" \
-    "spanning-tree portfast"
+# Perform compliance checks based on platform
+if [ "$PLATFORM" == "IOS" ]; then
+    check_config "1.1.1" "Ensure minimum password length is 15 or more" \
+        "show running-config | include enable secret" \
+        "enable secret"
+    check_config "1.1.2" "Ensure password complexity is enabled" \
+        "show running-config | include aaa common-criteria policy" \
+        "min-length 15"
+    check_config "1.2.1" "Ensure AAA authentication for local users" \
+        "show running-config | include aaa authentication login" \
+        "aaa authentication login default local"
+    check_config "1.3.1" "Ensure SSH is enabled" \
+        "show ip ssh" \
+        "SSH Enabled - version 2"
+    check_config "1.3.2" "Ensure SSH access is restricted" \
+        "show running-config | include line vty" \
+        "access-class [0-9]+ in"
+    check_config "1.3.3" "Ensure SSH uses strong ciphers" \
+        "show ip ssh" \
+        "Encryption Algorithms:.*aes256-ctr"
+    check_config "1.4.1" "Ensure login banner is configured" \
+        "show running-config | include banner motd" \
+        "banner motd"
+    check_config "1.4.2" "Ensure EXEC timeout is 10 minutes or less" \
+        "show running-config | include line vty" \
+        "exec-timeout 10"
+    check_config "2.1.1" "Ensure NTP is enabled" \
+        "show ntp status" \
+        "synchronized"
+    check_config "2.2.1" "Ensure logging is enabled" \
+        "show logging" \
+        "logging on"
+    check_config "2.2.2" "Ensure logging includes timestamps" \
+        "show running-config | include service timestamps" \
+        "service timestamps log datetime msec"
+    check_config "2.3.1" "Ensure SNMPv3 is used" \
+        "show snmp user" \
+        "v3.*auth sha"
+    check_config "2.3.2" "Ensure SNMP communities are not public/private" \
+        "show running-config | include snmp-server community" \
+        "^$"
+    check_config "3.1.1" "Ensure VTY lines use only SSH" \
+        "show running-config | include line vty" \
+        "transport input ssh"
+    check_config "3.1.2" "Ensure telnet is disabled" \
+        "show running-config | include line vty" \
+        "transport input (ssh|none)"
+    check_config "3.2.1" "Ensure loopback interface is configured" \
+        "show running-config | include interface Loopback" \
+        "interface Loopback0"
+    check_config "4.1.1" "Ensure ACLs are applied to interfaces" \
+        "show running-config | include interface" \
+        "ip access-group"
+    check_config "4.2.1" "Ensure port security is enabled" \
+        "show running-config | include switchport port-security" \
+        "switchport port-security"
+    check_config "5.1.1" "Ensure VLAN 1 is not used" \
+        "show running-config | include switchport access vlan" \
+        "switchport access vlan [2-9]|[1-9][0-9]+"
+    check_config "5.2.1" "Ensure spanning-tree PortFast is enabled on access ports" \
+        "show running-config | include spanning-tree portfast" \
+        "spanning-tree portfast"
+else
+    check_config "1.1.1" "Ensure minimum password length is 15 or more" \
+        "show running-config | section username" \
+        "username.*secret"
+    check_config "1.1.2" "Ensure password complexity is enabled" \
+        "show running-config | section password-policy" \
+        "min-length 15"
+    check_config "1.2.1" "Ensure AAA authentication for local users" \
+        "show running-config | section aaa authentication" \
+        "aaa authentication login default local"
+    check_config "1.3.1" "Ensure SSH is enabled" \
+        "show running-config | section feature ssh" \
+        "feature ssh"
+    check_config "1.3.2" "Ensure SSH access is restricted" \
+        "show running-config | section line vty" \
+        "ip access-class [A-Za-z0-9]+ in"
+    check_config "1.3.3" "Ensure SSH uses strong ciphers" \
+        "show running-config | section ssh server algorithms" \
+        "ssh server algorithms cipher.*aes256-ctr"
+    check_config "1.4.1" "Ensure login banner is configured" \
+        "show running-config | section banner" \
+        "banner motd"
+    check_config "1.4.2" "Ensure EXEC timeout is 10 minutes or less" \
+        "show running-config | section line vty" \
+        "exec-timeout 10"
+    check_config "2.1.1" "Ensure NTP is enabled" \
+        "show ntp status" \
+        "synchronized"
+    check_config "2.2.1" "Ensure logging is enabled" \
+        "show logging server" \
+        "logging server.*level 6"
+    check_config "2.2.2" "Ensure logging includes timestamps" \
+        "show running-config | section logging timestamp" \
+        "logging timestamp milliseconds"
+    check_config "2.3.1" "Ensure SNMPv3 is used" \
+        "show snmp user" \
+        "v3.*auth sha"
+    check_config "2.3.2" "Ensure SNMP communities are not public/private" \
+        "show running-config | section snmp-server community" \
+        "^$"
+    check_config "3.1.1" "Ensure VTY lines use only SSH" \
+        "show running-config | section line vty" \
+        "transport input ssh"
+    check_config "3.1.2" "Ensure telnet is disabled" \
+        "show running-config | section feature telnet" \
+        "^$"
+    check_config "3.2.1" "Ensure loopback interface is configured" \
+        "show running-config | section interface loopback" \
+        "interface loopback0"
+    check_config "4.1.1" "Ensure ACLs are applied to interfaces" \
+        "show running-config | section interface" \
+        "ip access-group"
+    check_config "4.2.1" "Ensure port security is enabled" \
+        "show running-config | section switchport port-security" \
+        "switchport port-security"
+    check_config "5.1.1" "Ensure VLAN 1 is not used" \
+        "show running-config | section switchport access vlan" \
+        "switchport access vlan [2-9]|[1-9][0-9]+"
+    check_config "5.2.1" "Ensure spanning-tree PortFast is enabled on access ports" \
+        "show running-config | section spanning-tree portfast" \
+        "spanning-tree portfast"
+fi
 
 # Calculate pass/fail counts
 pass_count=0
@@ -279,7 +389,7 @@ cat << EOF > $REPORT_FILE
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>CIS Cisco IOS Switch Compliance Report</title>
+    <title>$REPORT_TITLE</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
     <style>
@@ -294,7 +404,7 @@ cat << EOF > $REPORT_FILE
 </head>
 <body>
     <div class="container">
-        <h1 class="text-center mb-4">CIS Cisco IOS Benchmark Compliance Report</h1>
+        <h1 class="text-center mb-4">$REPORT_TITLE</h1>
         <p class="text-center">Generated on: $(date '+%Y-%m-%d %H:%M:%S %Z')</p>
         <hr>
 
